@@ -1,0 +1,7 @@
+domain: io
+repo: github.com/LERSONG/cephrbdstorage
+resources:
+- group: yamecloud
+  kind: CephRBDStorage
+  version: v1
+version: "2"

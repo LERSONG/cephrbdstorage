@@ -1,0 +1,20 @@
+# permissions for end users to view cephrbdstorages.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cephrbdstorage-viewer-role
+rules:
+- apiGroups:
+  - yamecloud.io
+  resources:
+  - cephrbdstorages
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - yamecloud.io
+  resources:
+  - cephrbdstorages/status
+  verbs:
+  - get
