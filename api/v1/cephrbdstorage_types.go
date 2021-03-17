@@ -31,7 +31,8 @@ type CephRBDStorageSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// StorageClassName
-	StorageClassName string `json:"StorageClassName,omitempty"`
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
 	// Provisioner indicates the type of the provisioner.
 	Provisioner string `json:"provisioner" protobuf:"bytes,2,opt,name=provisioner"`
 

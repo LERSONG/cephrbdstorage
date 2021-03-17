@@ -29,10 +29,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
 	"time"
+)
+
+const (
+	AdminSecretName  = "adminSecretName"
+	AdminSecretValue = "adminSecretValue"
+	UserSecretName   = "userSecretName"
+	UserSecretValue  = "userSecretValue"
+	SecretType       = "kubernetes.io/rbd"
+	SecretDataKey    = "key"
+	LabelHideKey     = "hide"
+	LabelHideValue   = "1"
 )
 
 // CephRBDStorageReconciler reconciles a CephRBDStorage object
@@ -46,12 +58,16 @@ type CephRBDStorageReconciler struct {
 // +kubebuilder:rbac:groups=yamecloud.io,resources=cephrbdstorages/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storages,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storages/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=,resources=secrets/status,verbs=get;update;patch
 
 func (r *CephRBDStorageReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	logf := r.Log.WithValues("cephrbdstorage", req.NamespacedName)
 
-	// your logic here
+	if req.Namespace == "" {
+		req.Namespace = "kube-system"
+	}
 	instance := &cephv1.CephRBDStorage{}
 	if err := r.Client.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
@@ -64,11 +80,11 @@ func (r *CephRBDStorageReconciler) Reconcile(req ctrl.Request) (ctrl.Result, err
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileSecret(instance); err != nil {
+	if err := r.syncSecret(instance); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileStorageClass(instance); err != nil {
+	if err := r.syncStorageClass(instance); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -79,85 +95,178 @@ func (r *CephRBDStorageReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&yamecloudv1.CephRBDStorage{}).
 		Owns(&storagev1.StorageClass{}).
+		Owns(&corev1.Secret{}).
 		Complete(r)
 }
 
-func (r *CephRBDStorageReconciler) reconcileStorageClass(instance *cephv1.CephRBDStorage) error {
-	storageClassName := instance.Spec.StorageClassName
-	if storageClassName == "" {
-		return nil
-	}
-	storageClass := &storagev1.StorageClass{}
-	namespacedName := types.NamespacedName{
-		Namespace: "",
-		Name:      storageClassName,
-	}
-	if err := r.Client.Get(context.Background(), namespacedName, storageClass); err != nil {
-		if errors.IsNotFound(err) {
-			storageClass = makeStorageClass(instance)
-			if err := r.Client.Create(context.Background(), storageClass); err != nil {
+func (r *CephRBDStorageReconciler) syncStorageClass(instance *cephv1.CephRBDStorage) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		instanceChanged := false
+		storageClassName := instance.Spec.StorageClassName
+		if storageClassName == "" {
+			storageClassName = generateStorageClassName(instance.Name)
+			instanceChanged = true
+			instance.Spec.StorageClassName = storageClassName
+		}
+		storageClass := &storagev1.StorageClass{}
+		namespacedName := types.NamespacedName{
+			Namespace: "",
+			Name:      storageClassName,
+		}
+		if err := r.Client.Get(context.Background(), namespacedName, storageClass); err != nil {
+			if errors.IsNotFound(err) {
+				storageClass = makeStorageClass(instance)
+				if err := r.Client.Create(context.Background(), storageClass); err != nil {
+					return err
+				}
+			} else {
 				return err
 			}
 		} else {
-			return err
+			changed, err := r.checkChangeForStorageClass(instance, storageClass)
+			if err != nil {
+				return err
+			}
+			if changed {
+				if err := r.Client.Update(context.Background(), storageClass); err != nil {
+					return err
+				}
+			}
 		}
-	}
+		if instanceChanged {
+			if err := r.Client.Update(context.Background(), instance); err != nil {
+				return err
+			}
+		}
 
-	return nil
+		return nil
+	})
 }
 
-func (r *CephRBDStorageReconciler) reconcileSecret(instance *yamecloudv1.CephRBDStorage) error {
-	storageClassName := instance.Spec.StorageClassName
-	if storageClassName == "" {
-		return nil
-	}
-
-	parameters := instance.Spec.Parameters
-	if len(parameters) == 0 {
-		return nil
-	}
-	adminSecretName := parameters["adminSecretName"]
-	if adminSecretName == "" {
-		adminSecretName = generateAdminSecretName(storageClassName)
+func (r *CephRBDStorageReconciler) syncSecret(instance *yamecloudv1.CephRBDStorage) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		instanceChanged := false
+		parameters := instance.Spec.Parameters
+		if len(parameters) == 0 {
+			return nil
+		}
+		adminSecretName := parameters[AdminSecretName]
+		if adminSecretName == "" {
+			adminSecretName = generateAdminSecretName(instance.Name)
+			parameters[AdminSecretName] = adminSecretName
+			instanceChanged = true
+		}
 		secret := &corev1.Secret{}
 		err := r.Client.Get(context.Background(), types.NamespacedName{Namespace: "kube-system", Name: adminSecretName}, secret)
 		if err != nil {
 			if errors.IsNotFound(err) {
 				secret.Name = adminSecretName
 				secret.Namespace = "kube-system"
-				secret.Type = "kubernetes.io/rbd"
-				secretData := make(map[string]string, 0)
-				adminSecretData := parameters["adminSecretData"]
-				if adminSecretData == "" {
-					return fmt.Errorf("adminSecretData must have value")
+				labels := make(map[string]string, 0)
+				labels[LabelHideKey] = LabelHideValue
+				secret.SetLabels(labels)
+				secret.SetOwnerReferences(utils.OwnerReference(instance, "CephRBDStorage"))
+				secret.Type = SecretType
+
+				if parameters[AdminSecretValue] != "" {
+					secretData := make(map[string]string, 0)
+					secretData[SecretDataKey] = parameters[AdminSecretValue]
+					secret.StringData = secretData
 				}
-				secretData["key"] = adminSecretData
-				secret.StringData = secretData
 				if err := r.Client.Create(context.Background(), secret); err != nil {
 					return err
 				}
 			} else {
 				return err
 			}
+		} else {
+			changed, err := r.checkChangeForSecret(instance, secret)
+			if err != nil {
+				return err
+			}
+			if changed {
+				if err := r.Client.Update(context.Background(), secret); err != nil {
+					return err
+				}
+			}
 		}
-		parameters["adminSecretName"] = adminSecretName
+
+		userSecretName := parameters[UserSecretName]
+		if userSecretName == "" {
+			userSecretData := parameters[UserSecretValue]
+			if userSecretData == "" {
+				return fmt.Errorf("userSecretValue must have value")
+			}
+			userSecretName = generateUserSecretName(instance.Name)
+			parameters[UserSecretName] = userSecretName
+			instanceChanged = true
+		}
+		if instanceChanged {
+			instance.Spec.Parameters = parameters
+			if err := r.Client.Update(context.Background(), instance); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+func (r *CephRBDStorageReconciler) checkChangeForStorageClass(instance *yamecloudv1.CephRBDStorage, storageClass *storagev1.StorageClass) (bool, error) {
+	isChange := false
+	if storageClass.Provisioner != instance.Spec.Provisioner {
+		isChange = true
+		storageClass.Provisioner = instance.Spec.Provisioner
 	}
-	userSecretName := parameters["userSecretName"]
-	if userSecretName == "" {
-		userSecretData := parameters["userSecretData"]
-		if userSecretData == "" {
-			return fmt.Errorf("userSecretData must have value")
-		}
-		userSecretName = generateUserSecretName(storageClassName)
-		parameters["userSecretName"] = userSecretName
+	if storageClass.ReclaimPolicy != instance.Spec.ReclaimPolicy {
+		isChange = true
+		storageClass.ReclaimPolicy = instance.Spec.ReclaimPolicy
+	}
+	if storageClass.VolumeBindingMode != instance.Spec.VolumeBindingMode {
+		isChange = true
+		storageClass.VolumeBindingMode = instance.Spec.VolumeBindingMode
 	}
 
-	err := r.Client.Update(context.Background(), instance)
-	if err != nil {
-		return err
+	if storageClass.Parameters == nil && instance.Spec.Parameters == nil {
+		return isChange, nil
+	}
+	if storageClass.Parameters == nil {
+		isChange = true
+		storageClass.Parameters = instance.Spec.Parameters
+		return isChange, nil
+	}
+	if instance.Spec.Parameters == nil {
+		isChange = true
+		storageClass.Parameters = nil
+		return isChange, nil
+	}
+	for key, value := range instance.Spec.Parameters {
+		if storageClass.Parameters[key] != value {
+			isChange = true
+			storageClass.Parameters[key] = value
+		}
 	}
 
-	return nil
+	return isChange, nil
+}
+
+func (r *CephRBDStorageReconciler) checkChangeForSecret(instance *yamecloudv1.CephRBDStorage, secret *corev1.Secret) (bool, error) {
+	changed := false
+	adminSecretValue := instance.Spec.Parameters[AdminSecretValue]
+	data := secret.Data
+	if data == nil {
+		data = make(map[string][]byte)
+	}
+	if adminSecretValue != string(data[SecretDataKey]) {
+		changed = true
+		data[SecretDataKey] = []byte(adminSecretValue)
+	}
+
+	return changed, nil
+}
+
+func generateStorageClassName(name string) string {
+	return name + "-storage-class-" + strconv.FormatInt(time.Now().Unix(), 10)
 }
 
 func generateAdminSecretName(storageClassName string) string {
@@ -179,7 +288,6 @@ func makeStorageClass(instance *yamecloudv1.CephRBDStorage) *storagev1.StorageCl
 	storageClass.Provisioner = instance.Spec.Provisioner
 	storageClass.ReclaimPolicy = instance.Spec.ReclaimPolicy
 	storageClass.VolumeBindingMode = instance.Spec.VolumeBindingMode
-	//todo: generate adminSecretName/userSecretName
 	storageClass.Parameters = instance.Spec.Parameters
 	return storageClass
 }

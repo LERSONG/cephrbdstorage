@@ -36,9 +36,6 @@ spec:
           spec:
             description: CephRBDStorageSpec defines the desired state of CephRBDStorage
             properties:
-              StorageClassName:
-                description: StorageClassName
-                type: string
               parameters:
                 additionalProperties:
                   type: string
@@ -51,6 +48,9 @@ spec:
               reclaimPolicy:
                 description: Dynamically provisioned PersistentVolumes of this storage
                   class are created with this reclaimPolicy. Defaults to Delete.
+                type: string
+              storageClassName:
+                description: StorageClassName
                 type: string
               volumeBindingMode:
                 description: VolumeBindingMode indicates how PersistentVolumeClaims

@@ -2,20 +2,17 @@ apiVersion: yamecloud.io/v1
 kind: CephRBDStorage
 metadata:
   name: kube-ceph-rbd-storage
-  annotations:
-    storageclass.kubernetes.io/is-default-class: 'true'
+  namespace: kube-system
 spec:
-  storageClassName: kube-ceph
   provisioner: ceph.com/rbd
   parameters:
     adminId: admin
-    adminSecretName: ceph-admin-secret
-    adminSecretNamespace: kube-system
+    adminSecretValue: ceph-admin-secret-value
     imageFeatures: layering
     imageFormat: '2'
     monitors: '10.200.45.30:6789,10.200.45.31:6789,10.200.45.32:6789'
     pool: kube
     userId: kube
-    userSecretName: ceph-kube-secret
+    userSecretValue: ceph-kube-secret-value
   reclaimPolicy: Retain
   volumeBindingMode: Immediate
