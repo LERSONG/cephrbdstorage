@@ -230,17 +230,21 @@ func (r *CephRBDStorageReconciler) checkChangeForStorageClass(instance *yameclou
 	if storageClass.Parameters == nil && instance.Spec.Parameters == nil {
 		return isChange, nil
 	}
-	if storageClass.Parameters == nil {
-		isChange = true
-		storageClass.Parameters = instance.Spec.Parameters
-		return isChange, nil
-	}
 	if instance.Spec.Parameters == nil {
 		isChange = true
 		storageClass.Parameters = nil
 		return isChange, nil
 	}
+	if storageClass.Parameters == nil {
+		storageClass.Parameters = makeStorageClassParameters(instance.Spec.Parameters)
+		isChange = true
+		return isChange, nil
+	}
+
 	for key, value := range instance.Spec.Parameters {
+		if key == AdminSecretValue || key == UserSecretValue {
+			continue
+		}
 		if storageClass.Parameters[key] != value {
 			isChange = true
 			storageClass.Parameters[key] = value
@@ -288,6 +292,20 @@ func makeStorageClass(instance *yamecloudv1.CephRBDStorage) *storagev1.StorageCl
 	storageClass.Provisioner = instance.Spec.Provisioner
 	storageClass.ReclaimPolicy = instance.Spec.ReclaimPolicy
 	storageClass.VolumeBindingMode = instance.Spec.VolumeBindingMode
-	storageClass.Parameters = instance.Spec.Parameters
+	storageClass.Parameters = makeStorageClassParameters(instance.Spec.Parameters)
 	return storageClass
+}
+
+func makeStorageClassParameters(crsParameters map[string]string) map[string]string {
+	if crsParameters == nil {
+		return nil
+	}
+	scParameters := make(map[string]string, 0)
+	for key, value := range crsParameters {
+		if key == AdminSecretValue || key == UserSecretValue {
+			continue
+		}
+		scParameters[key] = value
+	}
+	return scParameters
 }
