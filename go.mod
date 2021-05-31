@@ -1,4 +1,4 @@
-module github.com/LERSONG/cephrbdstorage
+module github.com/yametech/cephrbdstorage
 
 go 1.13
 

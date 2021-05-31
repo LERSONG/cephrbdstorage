@@ -1,7 +1,7 @@
 package utils
 
 import (
-	cephv1 "github.com/LERSONG/cephrbdstorage/api/v1"
+	cephv1 "github.com/yametech/cephrbdstorage/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )

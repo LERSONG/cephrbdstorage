@@ -27,7 +27,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	yamecloudv1 "github.com/LERSONG/cephrbdstorage/api/v1"
+	yamecloudv1 "github.com/yametech/cephrbdstorage/api/v1"
 	// +kubebuilder:scaffold:imports
 )
 

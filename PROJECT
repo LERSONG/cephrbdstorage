@@ -1,5 +1,5 @@
 domain: io
-repo: github.com/LERSONG/cephrbdstorage
+repo: github.com/yametech/cephrbdstorage
 resources:
 - group: yamecloud
   kind: CephRBDStorage

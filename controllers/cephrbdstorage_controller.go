@@ -19,10 +19,10 @@ package controllers
 import (
 	"context"
 	"fmt"
-	cephv1 "github.com/LERSONG/cephrbdstorage/api/v1"
-	yamecloudv1 "github.com/LERSONG/cephrbdstorage/api/v1"
-	"github.com/LERSONG/cephrbdstorage/utils"
 	"github.com/go-logr/logr"
+	cephv1 "github.com/yametech/cephrbdstorage/api/v1"
+	yamecloudv1 "github.com/yametech/cephrbdstorage/api/v1"
+	"github.com/yametech/cephrbdstorage/utils"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
